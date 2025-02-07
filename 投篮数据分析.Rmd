@@ -1,0 +1,870 @@
+---
+title: "解密传奇球星科比的真实比赛影响力"
+author: "PB22151749_黄脉_自己寻找的数据_否"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+  
+
+# 第一章 背景
+
+
+## 1.1传奇球星的科比的生涯简介
+
+科比·布莱恩特（Kobe
+Bryant）于1978年8月23日出生在美国宾夕法尼亚州费城。1996年，科比在NBA选秀中以第13顺位被夏洛特黄蜂队选中，随后被交易到洛杉矶湖人队。
+其整个职业生涯都效力于湖人队（1996-2016）。团队荣誉上，科比帮助球队赢得了五次NBA总冠军（2000,
+2001, 2002, 2009, 2010）。同时科比代表美国队参加了两届奥运会（2008,
+2012），并获得了两枚金牌。
+个人荣誉上，科比18次入选NBA全明星赛，1次获得NBA常规赛MVP（2008），11次入选NBA最佳阵容一队。可惜时不假年，这样一位荣誉等身的篮球运动员于2016年退役，三年多后在一起直升机事故中不幸遇难。
+科比不仅以其在篮球场上的卓越表现而闻名，还以其顽强的精神和职业道德激励了无数年轻球员。他的“曼巴精神”（mamba）成为了努力奋斗、不屈不挠的代名词。
+
+## 1.2数据分析目标
+
+近年来，不少新球迷和路人没有看过科比的比赛，加上科比整个职业生涯的14481次投篮打铁（未命中）占据NBA历史第一，导致他们产生了一种误区，认为科比的比赛影响力被过于夸大，从而嘲讽科比为“铁王”。
+再者，科比死亡的被不少别有用心的人嘲笑为“耐摔王”、“坠机王”。这些无不使人们对科比的真实比赛影响力产生质疑。科比到底是一个什么水平的球员？相信这是大家心中的疑问。
+作为NBA资深球迷，今天就让我来用严谨的数据分析来为大家全面呈现科比20年职业生涯的篮球技艺和比赛影响力。
+
+## 1.3数据分析设计思路
+
+我们从三个方面（空间、时间、对手）来解析科比的进攻。
+
+-   空间上，对科比的投篮方式和投篮位置进行出手数、命中率方面的分析。
+
+-   时间上，研究科比的命中率随着赛季、上场时间的变化。
+
+-   面对不同对手，研究科比的命中率和投篮方式。
+
+-   利用xgboost算法预测列“shot_made_flag”中的缺失值。
+
+# 第二章 数据读取和概览
+
+我们要使用的数据来源于知乎用户在体育专区的分享，其超链接如下：
+<https://pan.baidu.com/link/zhihu/7RhGzTuShjiGNL5kFEM3VU1yaybTpFTwdahT==>
+我们将其下载到文件“kobe_shoot.csv"。
+
+## 2.1加载R包
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(treemap)
+library(xgboost)
+library(data.table)
+library(Matrix)
+
+```
+
+## 2.2导入数据
+
+```{r}
+kobe<-read.csv("kobe_shoot.csv",header = T,as.is = TRUE)
+```
+
+检查数据中所包含缺失值的行。
+
+```{r}
+# 计算有缺失值的行数
+kobe <- read.csv("kobe_shoot.csv", header = TRUE)
+num_na_rows <- sum(is.na(kobe))
+cat("有缺失值的行数:", num_na_rows)
+# 计算每列的缺失值行数
+num_na_per_column <- colSums(is.na(kobe))
+print(num_na_per_column)
+```
+
+我们可以看到数据中只有列“shot_made_flag
+”中含有缺失值，且有5000行之多，故我们在这里预处理数据时不能冒然将含有缺失值的行删去。
+在后面处理有关列“shot_made_flag ”操作时，我们再对数据进行处理。
+
+## 2.3概览数据集
+
+```{r}
+#下面的代码初步展示了数据集的大小和结构。
+glimpse(kobe)
+```
+
+## 2.4变量解释
+
+```{r}
+#action_type                   投篮方式（细分）
+
+#combined_shot_type           投篮方式(大类)
+#其中Jump Shot（跳投）、Bank Shot（打板投篮）、Dunk（扣篮）
+#Hook Shot（勾手投篮）、Layup （上篮）、Tip Shot（补篮）
+
+#game_event_id                比赛时间ID
+
+#game_id                      比赛ID
+
+#lat                          投篮点
+
+#loc_x                        投篮点
+
+#loc_y                        投篮点
+
+#lon                          投篮点
+
+#minutes_remaining            单节剩余时间（分钟）
+
+#period                       表示第几节
+
+#playoffs                     是否是季后赛
+
+#season                       赛季
+
+#seconds_remaining            剩余时间（秒）
+
+#shot_distance                投篮距离
+
+#shot_made_flag               是否进球
+
+#shot_type                    两分球或三分球
+
+#shot_zone_area               投篮区域
+
+#shot_zone_basic              投篮区域（更具体）
+
+#shot_zone_range              投篮范围
+
+#team_id                      球队ID
+
+#team_name                    球队名称
+
+#game_date                    比赛日期
+
+#matchup                      比赛双方
+
+#opponent                     对手
+
+#shot_id                      投篮ID
+```
+
+# 第三章 科比在不同空间的表现
+
+## 3.1投篮方式分析
+
+### 3.1.1两分和三分出手占比
+
+```{r}
+tb2<-table(kobe$shot_type)
+lbl<-paste(names(tb2),"\n",tb2,sep = "")
+pie(tb2,labels=lbl,col=rainbow(length(tb2)),
+main = "两分球和三分球的出手次数饼图")
+```
+
+可以从饼图直观的看出科比在整个生涯两分球出手次数大约是三分球出手次数的四倍。这说明科比在尽量追求高效率的两分球，打法整体十分稳健。
+
+### 3.1.2各种投篮方式（大类）在篮球场上的点位分布
+
+```{r}
+# 筛选出不包含缺失值的数据点
+kobe_filtered <- kobe %>%
+  filter(!is.na(lat) & !is.na(lon) & !is.na(combined_shot_type))#其实这步可以省去，因为前面的预处理已经告诉我们只有列“shot_made_flag ”才有缺失值
+
+# 定义经纬度范围
+lat_range <- c(33.7, 34.0883)
+lon_range <- range(kobe_filtered$lon)  # 根据实际数据范围设置经度
+
+# 在指定范围内筛选数据点
+kobe_filtered <- kobe_filtered %>%
+  filter(lat >= lat_range[1] & lat <= lat_range[2] &
+         lon >= lon_range[1] & lon <= lon_range[2])
+ggplot() + 
+  geom_point(data=kobe_filtered %>% filter(combined_shot_type=="Jump Shot"),aes(x=lon, y=lat), colour="grey", alpha=0.3) +
+  geom_point(data=kobe_filtered %>% filter(combined_shot_type!="Jump Shot"), aes(x=lon, y=lat, colour=combined_shot_type), alpha=0.8) +
+  labs(title="combined_shot_type投篮方式（大类）") +ylim(c(33.7, 34.0883)) +theme_void() +
+  theme(legend.title=element_blank(),plot.title=element_text(hjust=0.5)) 
+```
+
+虽然我们开头已经知道只有列“shot_made_flag
+”中含有缺失值，但出于严谨性，我还是在此进行了含有缺失值的行的筛除，后面的若有则同理。
+放眼进攻半场，科比在每个位置都有大量的Jump
+Shot（跳投），在靠近篮筐的地方进行大量的Layup （上篮）和零星的Tip
+Shot（补篮）、Dunk（扣篮），在距离篮筐不远的两侧有着数量中等的Bank
+Shot（打板投篮）和Hook Shot（勾手投篮）。
+
+-   Bank Shot（打板投篮）的分布非常合理，因为只有在斜对着篮筐出手时Bank
+    Shot（打板投篮）的命中率最高。
+-   Layup
+    （上篮）的分布也非常合理,科比在上篮过程遇到篮底中锋的防守时并未急于出手，而是尽可能地靠近篮筐才出手，保证命中率的最大化。
+-   在任意位置都有大量的Jump
+    Shot（跳投）从侧面说明科比的进攻手段的丰富，无论面对高大中锋还是敏捷后卫的防守，科比都能完成Jump
+    Shot（跳投）出手。
+
+### 3.1.3各种投篮方式（大类）所占比例
+
+```{r}
+ d1<-data.frame(table(kobe$combined_shot_type))
+d1
+ggplot(d1,aes(x=reorder(Var1,Freq),y=Freq/30697))+
+  geom_col(aes(fill=Var1))+
+  geom_label(aes(label=round(Freq/30697,5)))+
+  theme_bw()
+```
+
+-   从结果图中看出来，Hook Shot(勾手投篮)、Tip Shoot(补篮)和Bank
+    Shoot(擦板投篮)是科比很少使用的进攻方式，Jump
+    Shoot(跳投)是他最常用的方式。
+
+-   这说明比科比并不是一个以攻筐为主的后卫（攻筐后卫代表有威少、罗斯），而是一个在外线大量投篮的后卫。这样做的好处显而易见，外线的频繁出手可以吸引敌方的“重点关照”，为己方中锋拉开空间，间接削弱己方内线所面临的防守强度。
+
+-   科比搭档过的内线队友无不印证这一事实，他们在来到科比身边后无论是出手数还是命中率都迎来了上涨。
+
+### 3.1.4各种投篮方式（细分）的命中率
+
+```{r}
+# 删除含有NA值的行
+kobe_clean1 <- kobe[complete.cases(kobe), ]
+
+# 删除`action_type`列中的NA值
+kobe_clean1 <- kobe_clean1[!is.na(kobe_clean1$action_type), ]
+
+# 确认清理后的数据集
+print(dim(kobe_clean1))
+kobe_clean1 %>%
+  group_by(action_type) %>%
+  summarise(Accuracy = mean(shot_made_flag),
+            counts = n()) %>%
+  filter(counts > 20) %>%
+  ggplot(aes(x = reorder(action_type, Accuracy), y = Accuracy)) + 
+  geom_point(aes(colour = Accuracy), size = 3) +
+  scale_colour_gradient(low = "orangered", high = "chartreuse3") +
+  labs(title = "Accuracy by shot type") +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+```
+
+-   可以看出在细分的32类投篮方式中，大类投篮方式命中率从低到高排序为Jump
+    Shot（跳投）、Tip Shot（补篮）、Hook Shot（勾手投篮）、Layup
+    （上篮）、Bank Shot（打板投篮）、Dunk（扣篮）。
+
+-   Turnaround
+    Shoot（翻身跳投）这种对身体素质要求极高的投篮方式命中率竟然逼近60%，足以说明科比变态的腰腹力量和炉火纯青的背身技术。
+
+-   所有带有Running（跑动）的投篮方式命中率均超过60%，说明科比的运动能力极佳，能够在高速移动中完成复杂动作。
+
+-   32类投篮方式说明了科比的技术全能，掌握了人类篮球后卫中所有的终结技巧。
+
+### 3.1.5各种投篮方式（大类+细分）的命中率
+
+```{r}
+group_cols <- c("combined_shot_type", "action_type") # columns to group by
+dots <- lapply(group_cols, as.symbol) # convert to list
+tableDF <- kobe %>% 
+  group_by_(.dots=dots) %>%
+  summarise(attempted = n(), avgAccuracy = mean(shot_made_flag, na.rm = TRUE))
+custom_hues <- c( rep("white",3), "yellow","purple" ) # make custom palette 
+treemap(tableDF[tableDF$combined_shot_type == "Jump Shot" & tableDF$action_type != "Jump Shot",],
+        index = "action_type", # only one level
+        vSize = "attempted",
+        vColor = "avgAccuracy",
+        type = "value",
+        title = "jump shots minus jump shots",
+        overlap.labels = 0.2, # avoid overlaps
+        palette = custom_hues
+        )
+
+
+treemap(tableDF[tableDF$combined_shot_type == "Layup",],
+        index = "action_type", # only one level
+        vSize = "attempted",
+        vColor = "avgAccuracy",
+        type = "value",
+        title = "only layup shots",
+        overlap.labels = 0.2, # avoid overlaps
+        palette = custom_hues
+        )
+treemap(tableDF[tableDF$combined_shot_type == "Dunk",],
+        index = "action_type", # only one level
+        vSize = "attempted",
+        vColor = "avgAccuracy",
+        type = "value",
+        title = "only dunk shots",
+        overlap.labels = 0.2, # avoid overlaps
+        palette = custom_hues
+        )
+treemap(tableDF[! tableDF$combined_shot_type %in% c("Jump Shot","Layup","Dunk"),],
+        index = c("combined_shot_type", "action_type"), # two hierarchy levels
+        vSize = "attempted",
+        vColor = "avgAccuracy",
+        type = "value",
+        title = "all except jump, layup or dunk",
+        overlap.labels = 0.2, # avoid overlaps
+        palette = custom_hues
+        )
+        
+```
+
+-   在跳投类中Turnaround Shoot（翻身跳投）、Fadeaway Jump
+    Shot（后仰跳投）、Running Jump Shot（急停跳投）、Turnaround Fadeaway
+    Shot（翻身后仰跳投）占据了跳投中约75%的出手比例，这些都是难度较大的技术动作，说明科比面对的防守压力十分巨大，不得不依靠这些动作获得投篮空间。同时这些投篮方式命中率均超过了50%。极高的命中率说明
+    科比在进攻方面的难以限制。
+
+-   在Layup(上篮)类中，Layup
+    Shot（普通三步上篮）命中率只有40%出头，说明科比的突破能力并不强。前面我们已经分析得出上篮的出手占比较低，这表明科比懂得扬长避短，更喜欢用自己所擅长跳投去完成进攻。Driving
+    Layup
+    Shot（快攻三步上篮）的命中率达到了80%，虽然已经远超联盟的平均水准，但在如威少、詹姆斯等快攻大神（常年90%以上）面前还是稍显孙色。
+    Reverse Layup
+    Shot（反篮）的命中率达到60%，中规中矩。后两项上篮面对的防守压力远远小于第一项
+    ，说明科比并不擅长在对抗中完成上篮动作。
+
+-   dunk shots（扣篮）类则无需多言，任何NBA运动员都能维持很高的水准。
+
+-   在非常规投篮类上，科比的表现则参差不齐。不过既然由于是非常规投篮，命中率低情有可原。其中只有Tip
+    Shot(补篮)命中率令人大跌眼镜
+    ，只有40%出头。补篮就是抢下队友投丢的球然后在篮下进行上篮，结合前面说的第二点，更加说明科比面对篮下高大的中锋不擅长对抗上篮。
+
+## 3.2投篮位置分析
+
+### 3.2.1不同投篮范围的出手占比
+
+```{r}
+# 筛选出不包含缺失值的数据点
+kobe_filtered <- kobe %>%
+  filter(!is.na(lat) & !is.na(lon) & !is.na(shot_zone_range))#其实这步可以省去，因为前面的预处理已经告诉我们只有列“shot_made_flag ”才有缺失值
+
+# 定义经纬度范围
+lat_range <- c(33.7, 34.0883)
+lon_range <- range(kobe_filtered$lon)  # 根据实际数据范围设置经度
+
+# 在指定范围内筛选数据点
+kobe_filtered <- kobe_filtered %>%
+  filter(lat >= lat_range[1] & lat <= lat_range[2] &
+         lon >= lon_range[1] & lon <= lon_range[2])
+
+p1 <- ggplot(kobe_filtered, aes(x=lon, y=lat)) +
+  geom_point(aes(color=shot_zone_range)) +
+  labs(title="Shot zone range投篮范围") +
+  ylim(c(33.7, 34.0883)) +
+  theme_void() +
+  theme(legend.position="none", plot.title=element_text(hjust=0.5)) 
+
+p2 <- ggplot(kobe_filtered, aes(x=fct_infreq(shot_zone_range))) + 
+  geom_bar(aes(fill=shot_zone_range)) +
+  labs(y="Frequency") +
+  theme_bw() +
+  theme(axis.title.x=element_blank(),  legend.position="none")
+grid.arrange(p1, p2, layout_matrix=cbind(c(1,2)))
+
+```
+
+-   随着距离的增加投篮占比逐渐减小，说明科比每次进攻时都在追求更靠近篮筐，这是十分理智的做法
+
+### 3.2.2不同投篮区域的出手占比
+
+```{r}
+# 筛选出不包含缺失值的数据点
+kobe_filtered <- kobe %>%
+  filter(!is.na(lat) & !is.na(lon) & !is.na(shot_zone_area))#其实这步可以省去，因为前面的预处理已经告诉我们只有列“shot_made_flag ”才有缺失值
+
+# 定义经纬度范围
+lat_range <- c(33.7, 34.0883)
+lon_range <- range(kobe_filtered$lon)  # 根据实际数据范围设置经度
+
+# 在指定范围内筛选数据点
+kobe_filtered <- kobe_filtered %>%
+  filter(lat >= lat_range[1] & lat <= lat_range[2] &
+         lon >= lon_range[1] & lon <= lon_range[2])
+
+p3 <- ggplot(kobe_filtered, aes(x=lon, y=lat)) +
+  geom_point(aes(colour=shot_zone_area)) +
+  labs(title="Shot zone area投篮区域") +
+  ylim(c(33.7, 34.0883)) +
+  theme_void() +
+  theme(legend.position="none", plot.title=element_text(hjust=0.5)) 
+
+p4 <- ggplot(kobe_filtered, aes(x=fct_infreq(shot_zone_area))) + 
+  geom_bar(aes(fill=shot_zone_area)) +
+  labs(y="Frequency") +
+  theme_bw() +
+  theme(axis.text.x=element_text(size=7),axis.title.x=element_blank(), legend.position="none")
+
+grid.arrange(p3, p4, layout_matrix=cbind(c(1,2)))
+
+```
+
+-   在篮筐的中轴线区域的出手压倒性地多于两翼，说明科比更喜欢面向框进攻而并非在两翼侧身进攻。
+
+### 3.2.3不同投篮区域（更具体）的出手占比
+
+```{r}
+# 筛选出不包含缺失值的数据点
+kobe_filtered <- kobe %>%
+  filter(!is.na(lat) & !is.na(lon) & !is.na(shot_zone_basic))#其实这步可以省去，因为前面的预处理已经告诉我们只有列“shot_made_flag ”才有缺失值
+
+# 定义经纬度范围
+lat_range <- c(33.7, 34.0883)
+lon_range <- range(kobe_filtered$lon)  # 根据实际数据范围设置经度
+
+# 在指定范围内筛选数据点
+kobe_filtered <- kobe_filtered %>%
+  filter(lat >= lat_range[1] & lat <= lat_range[2] &
+         lon >= lon_range[1] & lon <= lon_range[2])
+
+p5 <- ggplot(kobe_filtered, aes(x=lon, y=lat)) +
+  geom_point(aes(color=shot_zone_basic)) +
+  labs(title="Shot zone basic") +
+  ylim(c(33.7, 34.0883)) +
+  theme_void() +
+  theme(legend.position="none", plot.title=element_text(hjust=0.5))
+
+p6 <- ggplot(kobe_filtered, aes(x=fct_infreq(shot_zone_basic))) + 
+  geom_bar(aes(fill=shot_zone_basic)) +
+  labs(y="Frequency") +
+  theme_bw() +
+  theme(axis.text.x=element_text(size=6.3), axis.title.x=element_blank(), legend.position="none")
+
+grid.arrange(p5, p6, layout_matrix=cbind(c(1,2)))
+
+```
+
+-   科比的三分球投射集中于上三分线位置，在左右底角的三分远投占比极小，说明科比并不擅长在底角做一个接球投手。中距离的占比较高，这一区域也是能更好进行各种复杂技术动作的区域，能极大发挥科比的技术特性。限制区和肘区的出手次数加起来较高，说明科比有足够能力在近筐区域创造出手机会。
+
+### 3.2.4不同投篮范围、区域、区域（更具体）的命中率
+
+```{r}
+# 筛选出不包含缺失值的数据点
+kobe_filtered <- kobe %>%
+  filter(!is.na(lat) & !is.na(lon) & !is.na(shot_zone_range) & !is.na(shot_zone_area) & !is.na(shot_zone_basic) & !is.na(shot_made_flag))
+
+# 定义经纬度范围
+lat_range <- c(33.7, 34.0883)
+lon_range <- range(kobe_filtered$lon)  # 根据实际数据范围设置经度
+
+# 在指定范围内筛选数据点
+kobe_filtered <- kobe_filtered %>%
+  filter(lat >= lat_range[1] & lat <= lat_range[2] &
+         lon >= lon_range[1] & lon <= lon_range[2])
+
+p7 <- kobe_filtered %>%
+  select(lat, lon, shot_zone_range, shot_made_flag) %>%
+  group_by(shot_zone_range) %>%
+  mutate(Accuracy=mean(shot_made_flag)) %>%
+  ggplot(aes(x=lon, y=lat)) +
+  geom_point(aes(colour=Accuracy)) +
+  scale_colour_gradient(low="red", high="lightgreen") +
+  labs(title="投篮范围命中率") +
+  ylim(lat_range) +
+  theme_void() +
+  theme(plot.title=element_text(hjust=0.5))
+
+
+p8 <- kobe_filtered %>%
+  select(lat, lon, shot_zone_area, shot_made_flag) %>%
+  group_by(shot_zone_area) %>%
+  mutate(Accuracy=mean(shot_made_flag)) %>%
+  ggplot(aes(x=lon, y=lat)) +
+  geom_point(aes(colour=Accuracy)) +
+  scale_colour_gradient(low="red", high="lightgreen") +
+  labs(title="投篮区域命中率") +
+  ylim(lat_range) +
+  theme_void() +
+  theme(legend.position="none",
+        plot.title=element_text(hjust=0.5))
+
+
+p9 <- kobe_filtered %>%
+  select(lat, lon, shot_zone_basic, shot_made_flag) %>%
+  group_by(shot_zone_basic) %>%
+  mutate(Accuracy=mean(shot_made_flag)) %>%
+  ggplot(aes(x=lon, y=lat)) +
+  geom_point(aes(colour=Accuracy)) +
+  scale_colour_gradient(low="red", high="lightgreen") +
+  labs(title="投篮区域（更具体）命中率") +
+  ylim(lat_range) +
+  theme_void() +
+  theme(legend.position="none",
+        plot.title=element_text(hjust=0.5))
+
+# 排列子图
+grid.arrange(p7, p8, p9, layout_matrix=cbind(c(1,2), c(1,3)))
+
+```
+
+-   结合前文的出手占比，足以说明科比能够在低位和篮筐中轴线区域进行大量且高效的出手，在中距离进行大量且中高效的出手，在三分线进行少量且效率一般的出手。
+
+### 3.2.5不同距离的命中率
+
+```{r}
+# 检查数据集中是否有缺失值或不在指定范围内的值
+summary(kobe$shot_distance)
+
+# 删除含有缺失值或不在指定范围内的值的行
+kobe_clean2 <- kobe[complete.cases(kobe) & kobe$shot_distance >= 0 & kobe$shot_distance <= 45, ]
+
+# 重新绘制图形
+kobe_clean2 %>%
+  group_by(shot_distance) %>%
+  summarise(Accuracy = mean(shot_made_flag)) %>%
+  ggplot(aes(x = shot_distance, y = Accuracy)) + 
+  geom_line(aes(colour = Accuracy)) +
+  geom_point(aes(colour = Accuracy), size = 2) +
+  scale_colour_gradient(low = "orangered", high = "chartreuse3") +
+  labs(title = "Accuracy by shot distance", x = "Shot distance (ft.)") +
+  xlim(c(0, 45)) +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+```
+
+-   直观感受距离对命中率的影响，1到3英寸和25到29英寸命中率显著下滑，4英寸到24英寸命中率缓慢下滑，30英寸外命中率则波动较大。
+
+# 第四章 科比在不同时间的表现
+
+## 4.1赛季变化
+
+### 4.1.1整体命中率随赛季变化的趋势
+
+```{r}
+# 确保kobe数据集中没有缺失值并在绘图范围内
+kobe_clean <- kobe %>%
+  filter(!is.na(shot_made_flag))
+kobe_clean[kobe_clean$season=="Jan-00","season"]<-"2000-01"
+kobe_clean[kobe_clean$season=="Feb-01","season"]<-"2001-02"
+kobe_clean[kobe_clean$season=="Mar-02","season"]<-"2002-03"
+kobe_clean[kobe_clean$season=="Apr-03","season"]<-"2003-04"
+kobe_clean[kobe_clean$season=="May-04","season"]<-"2004-05"
+kobe_clean[kobe_clean$season=="Jun-05","season"]<-"2005-06"
+kobe_clean[kobe_clean$season=="Jul-06","season"]<-"2006-07"
+kobe_clean[kobe_clean$season=="Aug-07","season"]<-"2007-08"
+kobe_clean[kobe_clean$season=="Sep-08","season"]<-"2008-09"
+kobe_clean[kobe_clean$season=="Oct-09","season"]<-"2009-10"
+kobe_clean[kobe_clean$season=="Nov-10","season"]<-"2010-11"
+kobe_clean[kobe_clean$season=="Dec-11","season"]<-"2011-12"
+
+kobe_clean %>%
+  group_by(season) %>%
+  summarise(Accuracy = mean(shot_made_flag, na.rm = TRUE)) %>%
+  ggplot(aes(x = season, y = Accuracy, group = 1)) +
+  geom_line(aes(colour = Accuracy)) +
+  geom_point(aes(colour = Accuracy), size = 3) +
+  scale_colour_gradient(low = "orangered", high = "chartreuse3") +
+  labs(title = "Accuracy by Season", x = "Season") +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+```
+
+-   由于数据集的存储错误，先对数据集赛季内容进行一一替换。
+
+-   科比总共有10个赛季命中率超过45%，表明其巅峰超长。1996-1999属于成长期（仅仅过了2年便成为联盟顶级后卫
+    ），2002-2005由于没有好的帮手而下滑，2013年遭遇大伤加上年龄已大，从此以后便迅速下滑。
+
+### 4.1.2两分球、三分球命中率随赛季变化的趋势
+
+```{r}
+
+kobe_clean%>%
+  group_by(season) %>%
+  summarise(TwoPoint=mean(shot_made_flag[shot_type=="2PT Field Goal"]),
+            ThreePoint=mean(shot_made_flag[shot_type=="3PT Field Goal"])) %>%
+  ggplot(aes(x=season, group=1)) +
+  geom_line(aes(y=TwoPoint, colour="TwoPoint")) +
+  geom_line(aes(y=ThreePoint, colour="ThreePoint")) +
+  geom_point(aes(y=TwoPoint, colour="TwoPoint"), size=3) +
+  geom_point(aes(y=ThreePoint, colour="ThreePoint"), size=3) +
+  labs(title="Accuracy by season", 
+       subtitle="2PT Field Goal and 3PT Field Goal",
+       x="Season", y="Accuracy") +
+  theme_bw() +
+  theme(legend.title=element_blank(),
+        legend.position="bottom",
+        axis.text.x=element_text(angle=45, hjust=1),
+        plot.title=element_text(hjust=0.5),
+        plot.subtitle=element_text(hjust=0.5)) 
+```
+
+-   两分球命中率竟然有18个赛季的命中率都超过了45%，20个赛季超过40%，表明科比整个生涯都是两分球绝对的王者，能够进行大量且高效的出手。
+
+-   三分球的命中率整体低于两分球，只有9个赛季超过35%，其余赛季则较为平庸，基本都是30%上下，大伤后的一年更是迅速下降。
+
+-   结合上一个图的分析，不难看出整体命中率受三分球命中率的影响较大。
+
+### 4.1.3常规赛、季后赛命中率随赛季变化的趋势
+
+```{r}
+
+kobe_clean %>%
+  group_by(season) %>%
+  summarise(Playoff=mean(shot_made_flag[playoffs==1]),
+            RegularSeason=mean(shot_made_flag[playoffs==0])) %>%
+  ggplot(aes(x=season, group=1)) +
+  geom_line(aes(y=Playoff, colour="Playoff")) +
+  geom_line(aes(y=RegularSeason, colour="RegularSeason")) +
+  geom_point(aes(y=Playoff, colour="Playoff"), size=3) +
+  geom_point(aes(y=RegularSeason, colour="RegularSeason"), size=3) +
+  labs(title="Accuracy by season", 
+       subtitle="Playoff and Regular Season",
+       x="Season", y="Accuracy") +
+  theme_bw() +
+  theme(legend.title=element_blank(),
+        legend.position="bottom",
+        axis.text.x=element_text(angle=45, hjust=1),
+        plot.title=element_text(hjust=0.5),
+        plot.subtitle=element_text(hjust=0.5)) 
+
+```
+
+-   由于我们已经保证没有缺失值，故警告信息里去掉的行都是因为“outside the
+    scale range (`geom_line()`)
+    or(`geom_point()`)”。而且只有9行，对整体分布毫无影响。
+
+-   NBA每年赛季分为Regular Season（常规赛）和Playoff
+    Season（季后赛），每年进行82场常规赛，选取其中排名前16的队伍参加季后赛，即淘汰赛。
+
+-   从图中可以看到科比有五年未能进入季后赛，13年及以后都未能进入，说明科比13年大伤后下滑严重。
+
+-   季后赛的防守强度较大，因此命中率普遍低于常规赛。其中2005-06和2007-08季后赛竟然能高于常规赛，说明科比在这两年的季后赛发挥极其神勇。
+    在1998-2012时间段，科比没有遭遇重大伤病且具有良好的体能，能够将漫长的季后赛和激烈的常规赛命中率统统维持在42.5%以上。
+
+## 4.2场内变化
+
+### 4.2.1一分钟内命中率
+
+```{r}
+# Check for and remove NA values in the shot_made_flag column
+kobe_clean <- kobe %>% filter(!is.na(shot_made_flag))
+
+# Group by seconds_remaining and calculate Accuracy
+accuracy_data <- kobe_clean %>%
+  group_by(seconds_remaining) %>%
+  summarise(Accuracy = mean(shot_made_flag, na.rm = TRUE))
+
+# Plot the data
+ggplot(accuracy_data, aes(x = seconds_remaining, y = Accuracy)) + 
+  geom_bar(aes(fill = Accuracy), stat = "identity") +
+  scale_fill_gradient(low = "orangered", high = "chartreuse3") +
+  labs(title = "Accuracy by Seconds Remaining", x = "Seconds Remaining") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+
+```
+
+-   由于列“shot_made_flag”中包含缺失值，故我们先对数据集进行数据清洗，得到kobe_clean。
+
+-   可以看到，除开最后三秒，科比的命中率几乎都在45%左右，说明科比的体能充沛。故最后三秒的下降往往由于出手时间较短，导致出手仓促，投篮动作发生变形。
+
+### 4.2.2一节内命中率
+
+```{r}
+kobe_clean %>%
+  group_by(minutes_remaining) %>%
+  summarise(Accuracy=mean(shot_made_flag)) %>%
+  ggplot(aes(x=minutes_remaining, y=Accuracy)) + 
+  geom_bar(aes(fill=Accuracy), stat="identity") +
+  scale_fill_gradient(low="orangered", high="chartreuse3") +
+  labs(title="Accuracy by minutes remaining", x="Minutes remaining")  +
+  theme_bw() +
+  theme(legend.position="none",
+        plot.title=element_text(hjust=0.5)) 
+```
+
+-   可以看到科比在每一节开始需要3分钟来找到手感，随后3到11分钟将命中率维持在45%左右的高效水平，最后一分钟的下滑则可以理解，毕竟没有人能整节都保持高效。
+
+# 第五章 科比面对不同对手的表现
+
+## 5.1面对不同对手的出手分配
+
+```{r}
+ggplot(kobe_clean, aes(factor(opponent), fill=factor(shot_made_flag))) +
+  geom_bar(position="dodge") +
+  theme(axis.text.x = element_text(angle = 20, hjust = 0.5, size = 5.5), # 调整标签角度和字体大小
+        axis.title.x = element_text(size = 14), # 调整横坐标标题大小
+        axis.title.y = element_text(size = 14), # 调整纵坐标标题大小
+        plot.title = element_text(hjust = 0.5, size = 16)) + # 调整标题大小并居中
+  labs(x = "Opponent", y = "Count", fill = "Shot Made Flag") +
+  ggtitle("Distribution of Shot Made Flag by Opponent")
+```
+
+-   可以看出队伍BOS,DAL,DEN,MIN,PHX,SAS,UTA对科比的限制比较好，在大量的交手中迫使科比投丢了更多的球。
+
+## 5.2面对不同对手的投篮方式
+
+```{r}
+# 创建条形图，并调整横坐标标签的角度和大小
+ ggplot(kobe_clean, aes(factor(opponent), fill=factor(combined_shot_type))) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 25, hjust = 0.4, size = 5.5)) +
+  labs(x = "Opponent", y = "Count", fill = "Shot Type") +
+  ggtitle("Distribution of Combined Shot Types by Opponent")
+```
+
+-   面对不同球队不同风格的防守，科比几乎都能完成所有的大类投篮动作，再次说明科比的技术全能，当之无愧的进攻“超纲”。同时面对不同队伍科比的各种大类投篮方式占比不同，说明科比懂得根据敌人的防守策略做出合理的投篮选择。
+
+# 第六章 建立模型预测列“shot_made_flag”中的缺失值
+
+```{r}
+cat("Loading libraries...\n");
+
+cat("Reading CSV file...\n");
+completeData <- as.data.frame(fread("kobe_shoot.csv", header = T, stringsAsFactors = T))
+
+cat("Splitting data...\n");
+train<-subset(completeData, !is.na(completeData$shot_made_flag));
+test<-subset(completeData, is.na(completeData$shot_made_flag));
+
+test.id <- test$shot_id;
+train$shot_id <- NULL;
+test$shot_id <- NULL;
+
+cat("Creating new features...\n");
+train$time_remaining <- train$minutes_remaining*60+train$seconds_remaining;
+test$time_remaining <- test$minutes_remaining*60+test$seconds_remaining;
+
+cat("Treating features...\n");
+train$shot_distance[train$shot_distance>45] <- 45;
+test$shot_distance[test$shot_distance>45] <- 45;
+
+cat("Dropping features...\n");
+train$seconds_remaining<-NULL;
+test$seconds_remaining<-NULL;
+train$team_name <- NULL;
+test$team_name <- NULL;
+train$team_id <- NULL;
+test$team_id <- NULL;
+train$game_event_id <- NULL;
+test$game_event_id <- NULL;
+train$game_id <- NULL;
+test$game_id <- NULL;
+train$lat <- NULL;
+test$lat <- NULL;
+train$lon <- NULL;
+test$lon <- NULL;
+
+train.y = train$shot_made_flag;
+
+train$shot_made_flag <- NULL;
+test$shot_made_flag <- NULL;
+
+pred <- rep(0,nrow(test));
+
+cat("Creating data.matrix...\n");
+trainM<-data.matrix(train, rownames.force = NA);
+cat("Creating DMarix for xgboost...\n");
+dtrain <- xgb.DMatrix(data=trainM, label=train.y, missing = NaN);
+
+watchlist <- list(trainM=dtrain);
+
+set.seed(1984);
+
+param <- list(  objective           = "binary:logistic", 
+                booster             = "gbtree",
+                eval_metric         = "error",
+                eta                 = 0.035,
+                max_depth           = 4,
+                subsample           = 0.40,
+                colsample_bytree    = 0.40
+)
+
+clf <- xgb.cv(  params              = param, 
+                data                = dtrain, 
+                nrounds             = 1500, 
+                verbose             = 1,
+                watchlist           = watchlist,
+                maximize            = FALSE,
+                nfold               = 3,
+                early.stop.round    = 10,
+                print.every.n       = 1
+);
+
+clf
+as.matrix(clf)
+
+
+clf <- xgb.train(   params              = param, 
+                    data                = dtrain, 
+                    nrounds             = 89, 
+                    verbose             = 1,
+                    watchlist           = watchlist,
+                    maximize            = FALSE
+)
+
+testM <-data.matrix(test, rownames.force = NA);
+preds <- predict(clf, testM);
+
+submission <- data.frame(shot_id=test.id, shot_made_flag=preds);
+cat("Saving the submission file\n");
+write.csv(submission, "predictxgboost.csv", row.names = F)
+
+```
+
+-   既然列“shot_made_flag”有缺失值，那能不能通过整体数据对其进行预测？这里我们采用XGBoost算法进行预测。
+
+-   读取数据：使用fread从data.csv文件读取数据，这个函数来自data.table包，通常用于快速读取大数据集。
+    header = T表示数据文件的第一行是列名。 stringsAsFactors =
+    T表示将所有字符型数据自动转换为因子型，以避免字符和因子型数据的不一致问题。
+
+-   数据分割：使用subset函数根据shot_made_flag字段是否有缺失值来分割数据集，没有缺失值的作为训练集，有缺失值的作为测试集。
+
+-   创建新特征：将分钟和秒转换为总秒数，创建新特征time_remaining，有助于模型理解比赛剩余时间的影响。
+
+-   特征处理：对shot_distance字段中的值进行截断，超过45英尺的距离被设置为45，为了简化模型或防止极端值的影响。
+
+-   删除特征：移除与预测目标shot_made_flag无关的特征，如比赛ID、队伍名称、经纬度等，以减少模型复杂度并防止过拟合。
+
+-   数据预处理：从训练集中提取目标变量train.y，然后从训练集和测试集中删除shot_made_flag字段。
+
+-   创建数据矩阵：将清洗后的训练集和测试集转换为data.matrix格式，这是XGBoost所需的数据格式。
+
+-   创建XGBoost数据对象：
+    使用xgb.DMatrix函数创建XGBoost可以处理的数据对象dtrain，同时指定了缺失值。
+
+-   设置参数：定义XGBoost模型的参数，包括目标函数为二元逻辑回归binary:logistic，提升器类型为gbtree，学习率eta，最大深度max_depth，以及树的采样比例subsample和列的采样比例colsample_bytree。
+
+-   交叉验证：使用xgb.cv函数进行交叉验证，nrounds指定了总的迭代次数，nfold指定了折数，early.stop.round指定了早停的轮数。
+
+-   模型训练：根据交叉验证的结果，使用xgb.train函数训练最终模型。
+
+-   预测：使用训练好的模型对测试集进行预测，生成预测结果preds。
+
+-   生成提交文件：创建一个数据框submission，包含测试集ID和预测结果，然后保存为CSV文件，用于提交或进一步分析。
+
+-   输出信息：使用cat函数在控制台输出信息，以指示代码执行的进度。代码中的set.seed函数确保了结果的可重复性，这对于模型调参和验证非常重要。verbose参数控制了XGBoost训练过程中的输出信息量，有助于监控训练过程。
+
+-   最后结果存储在文件“predictxgboost.csv”中，与原始数据集都一并放在了zip中。
+
+```{r}
+kobe2<-read.csv("predictxgboost.csv",header=T)
+mean(kobe2$shot_made_flag)
+```
+
+-   预测缺失值的平均数超过0.45，更加佐证了科比的高效。
+
+# 第七章 总结科比的比赛风格
+
+-   全面的技术能力：科比展示了出色的技术全面性，能够完成各种大类的投篮动作，包括跳投、上篮、扣篮、打板投篮和勾手投篮等。
+
+-   高效的得分方式：他的两分球出手次数大约是三分球出手次数的四倍，表明他更倾向于追求高效率的两分球，打法整体十分稳健。
+
+-   投篮位置的偏好：科比在篮球场上的投篮分布显示，他偏好在中距离区域进行出手，同时在篮下有高效的扣篮。
+
+-   进攻选择的合理性：面对不同对手的防守策略，科比能够做出合理的投篮选择，他的投篮方式占比会根据对手的不同而有所调整。
+
+-   关键时效的发挥：在比赛的关键时刻，科比能够保持较高的命中率，特别是在最后三秒内，尽管命中率有所下降，但整体表现依然出色。
+
+-   赛季和体能管理：科比的赛季命中率变化显示，他有超长的巅峰期，且在没有重大伤病和良好体能的情况下，能够维持高效的命中率。
+
+-   季后赛的卓越表现：季后赛的防守强度较大，但科比在2005-06和2007-08赛季的季后赛中命中率高于常规赛，显示了他在高压情况下的卓越表现。
+
+-   XGBoost模型预测：通过XGBoost模型对科比的投篮命中率进行预测，进一步证实了他在比赛中的得分能力和影响力。
+
+-   对抗不同对手的适应性：面对不同对手时，科比的投篮方式和命中率有所变化，表明他能够根据对手的特点调整自己的比赛策略。
+
+-   职业生涯的持续影响力：科比的职业生涯不仅以其卓越的比赛表现而闻名，他的“曼巴精神”也激励了无数年轻球员。
