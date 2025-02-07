@@ -1,6 +1,6 @@
 ---
 title: "解密传奇球星科比的真实比赛影响力"
-author: "PB22151749_黄脉_自己寻找的数据_否"
+author: "黄脉"
 output:
   html_document:
     toc: true
